@@ -1,0 +1,153 @@
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import entropy
+
+def calculate_metrics(image):
+    """Menghitung metrik kuantitatif citra"""
+    mean = np.mean(image)
+    std = np.std(image)
+    
+    # Hitung entropi
+    hist, _ = np.histogram(image.flatten(), 256, [0,256])
+    hist_prob = hist / hist.sum()
+    img_entropy = entropy(hist_prob, base=2)
+    
+    return mean, std, img_entropy
+
+def histogram_equalization(image):
+    """Melakukan perataan histogram"""
+    return cv2.equalizeHist(image)
+
+def histogram_specification(source, reference):
+    """Melakukan spesifikasi histogram"""
+    # Hitung histogram kumulatif
+    source_hist, _ = np.histogram(source.flatten(), 256, [0,256])
+    reference_hist, _ = np.histogram(reference.flatten(), 256, [0,256])
+    
+    source_cdf = source_hist.cumsum()
+    source_cdf = source_cdf / source_cdf[-1]
+    
+    reference_cdf = reference_hist.cumsum()
+    reference_cdf = reference_cdf / reference_cdf[-1]
+    
+    # Buat lookup table
+    lookup_table = np.zeros(256)
+    for i in range(256):
+        idx = np.argmin(np.abs(reference_cdf - source_cdf[i]))
+        lookup_table[i] = idx
+    
+    # Terapkan lookup table
+    result = lookup_table[source].astype(np.uint8)
+    return result
+
+# Load citra
+img_dark = cv2.imread('dark_image.jpg', cv2.IMREAD_GRAYSCALE)
+img_bright = cv2.imread('bright_image.jpg', cv2.IMREAD_GRAYSCALE)
+
+# Jika file tidak ada, buat contoh citra
+if img_dark is None:
+    img_dark = np.random.normal(50, 10, (300, 300)).astype(np.uint8)
+if img_bright is None:
+    img_bright = np.random.normal(200, 10, (300, 300)).astype(np.uint8)
+
+# Analisis citra asli
+print("=== ANALISIS CITRA ASLI ===")
+mean_dark, std_dark, entropy_dark = calculate_metrics(img_dark)
+mean_bright, std_bright, entropy_bright = calculate_metrics(img_bright)
+
+print(f"Citra Gelap - Mean: {mean_dark:.2f}, Std: {std_dark:.2f}, Entropy: {entropy_dark:.2f}")
+print(f"Citra Terang - Mean: {mean_bright:.2f}, Std: {std_bright:.2f}, Entropy: {entropy_bright:.2f}")
+
+# Visualisasi citra asli dan histogram
+plt.figure(figsize=(15, 10))
+
+# Citra gelap
+plt.subplot(3, 4, 1)
+plt.imshow(img_dark, cmap='gray')
+plt.title('Citra Gelap Asli')
+plt.axis('off')
+
+plt.subplot(3, 4, 2)
+plt.hist(img_dark.flatten(), 256, [0,256])
+plt.title('Histogram Citra Gelap')
+
+# Citra terang
+plt.subplot(3, 4, 3)
+plt.imshow(img_bright, cmap='gray')
+plt.title('Citra Terang Asli')
+plt.axis('off')
+
+plt.subplot(3, 4, 4)
+plt.hist(img_bright.flatten(), 256, [0,256])
+plt.title('Histogram Citra Terang')
+
+# Histogram Equalization
+img_dark_eq = histogram_equalization(img_dark)
+img_bright_eq = histogram_equalization(img_bright)
+
+print("\n=== HASIL HISTOGRAM EQUALIZATION ===")
+mean_dark_eq, std_dark_eq, entropy_dark_eq = calculate_metrics(img_dark_eq)
+mean_bright_eq, std_bright_eq, entropy_bright_eq = calculate_metrics(img_bright_eq)
+
+print(f"Citra Gelap EQ - Mean: {mean_dark_eq:.2f}, Std: {std_dark_eq:.2f}, Entropy: {entropy_dark_eq:.2f}")
+print(f"Citra Terang EQ - Mean: {mean_bright_eq:.2f}, Std: {std_bright_eq:.2f}, Entropy: {entropy_bright_eq:.2f}")
+
+# Visualisasi hasil equalization
+plt.subplot(3, 4, 5)
+plt.imshow(img_dark_eq, cmap='gray')
+plt.title('Citra Gelap Setelah EQ')
+plt.axis('off')
+
+plt.subplot(3, 4, 6)
+plt.hist(img_dark_eq.flatten(), 256, [0,256])
+plt.title('Histogram Setelah EQ')
+
+plt.subplot(3, 4, 7)
+plt.imshow(img_bright_eq, cmap='gray')
+plt.title('Citra Terang Setelah EQ')
+plt.axis('off')
+
+plt.subplot(3, 4, 8)
+plt.hist(img_bright_eq.flatten(), 256, [0,256])
+plt.title('Histogram Setelah EQ')
+
+# Histogram Specification
+print("\n=== HISTOGRAM SPECIFICATION ===")
+print("Mengubah citra gelap menyerupai histogram citra terang")
+img_spec = histogram_specification(img_dark, img_bright)
+
+mean_spec, std_spec, entropy_spec = calculate_metrics(img_spec)
+print(f"Citra Hasil Specification - Mean: {mean_spec:.2f}, Std: {std_spec:.2f}, Entropy: {entropy_spec:.2f}")
+
+# Visualisasi hasil specification
+plt.subplot(3, 4, 9)
+plt.imshow(img_spec, cmap='gray')
+plt.title('Hasil Histogram Specification')
+plt.axis('off')
+
+plt.subplot(3, 4, 10)
+plt.hist(img_spec.flatten(), 256, [0,256])
+plt.title('Histogram Hasil Specification')
+
+# Perbandingan histogram
+plt.subplot(3, 4, 11)
+plt.hist(img_dark.flatten(), 256, [0,256], alpha=0.7, label='Source')
+plt.hist(img_bright.flatten(), 256, [0,256], alpha=0.7, label='Reference')
+plt.hist(img_spec.flatten(), 256, [0,256], alpha=0.7, label='Result')
+plt.title('Perbandingan Histogram')
+plt.legend()
+
+plt.tight_layout()
+plt.show()
+
+# Tabel hasil perbandingan
+print("\n=== TABEL PERBANDINGAN METRIK ===")
+print("+" + "-"*50 + "+")
+print("| Metrik           | Asli   | EQ     | Spec   |")
+print("+" + "-"*50 + "+")
+print(f"| Citra Gelap     |        |        |        |")
+print(f"| - Mean          | {mean_dark:6.2f} | {mean_dark_eq:6.2f} | {mean_spec:6.2f} |")
+print(f"| - Std Dev       | {std_dark:6.2f} | {std_dark_eq:6.2f} | {std_spec:6.2f} |")
+print(f"| - Entropy       | {entropy_dark:6.2f} | {entropy_dark_eq:6.2f} | {entropy_spec:6.2f} |")
+print("+" + "-"*50 + "+")
