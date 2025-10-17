@@ -1,0 +1,205 @@
+from flask import Flask, render_template, request, jsonify, send_file
+import cv2
+import numpy as np
+import base64
+import io
+from PIL import Image
+import matplotlib.pyplot as plt
+from scipy.stats import entropy
+import json
+
+app = Flask(__name__)
+
+class HistogramProcessor:
+    @staticmethod
+    def calculate_metrics(image):
+        """Menghitung metrik kuantitatif citra"""
+        mean = np.mean(image)
+        std = np.std(image)
+        
+        hist, _ = np.histogram(image.flatten(), 256, [0,256])
+        hist_prob = hist / hist.sum()
+        img_entropy = entropy(hist_prob, base=2)
+        
+        return {
+            'mean': float(mean),
+            'std': float(std),
+            'entropy': float(img_entropy)
+        }
+    
+    @staticmethod
+    def histogram_equalization(image):
+        """Melakukan perataan histogram"""
+        return cv2.equalizeHist(image)
+    
+    @staticmethod
+    def histogram_specification(source, reference):
+        """Melakukan spesifikasi histogram"""
+        source_hist, _ = np.histogram(source.flatten(), 256, [0,256])
+        reference_hist, _ = np.histogram(reference.flatten(), 256, [0,256])
+        
+        source_cdf = source_hist.cumsum()
+        source_cdf = source_cdf / source_cdf[-1]
+        
+        reference_cdf = reference_hist.cumsum()
+        reference_cdf = reference_cdf / reference_cdf[-1]
+        
+        lookup_table = np.zeros(256)
+        for i in range(256):
+            idx = np.argmin(np.abs(reference_cdf - source_cdf[i]))
+            lookup_table[i] = idx
+        
+        result = lookup_table[source].astype(np.uint8)
+        return result
+    
+    @staticmethod
+    def create_histogram_plot(image, title):
+        """Membuat plot histogram dalam format base64"""
+        plt.figure(figsize=(6, 4))
+        plt.hist(image.flatten(), 256, [0,256], alpha=0.7, color='blue')
+        plt.title(title)
+        plt.xlabel('Intensitas Piksel')
+        plt.ylabel('Frekuensi')
+        plt.grid(True, alpha=0.3)
+        
+        # Convert plot to base64
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+        buf.seek(0)
+        plot_data = base64.b64encode(buf.getvalue()).decode('utf-8')
+        plt.close()
+        
+        return plot_data
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/upload', methods=['POST'])
+def upload_image():
+    try:
+        file = request.files['image']
+        image_type = request.form['type']
+        
+        # Read image
+        img = Image.open(file.stream)
+        img = img.convert('L')  # Convert to grayscale
+        img_array = np.array(img)
+        
+        # Calculate metrics
+        metrics = HistogramProcessor.calculate_metrics(img_array)
+        
+        # Create histogram plot
+        hist_plot = HistogramProcessor.create_histogram_plot(
+            img_array, 
+            f'Histogram - {image_type.capitalize()} Image'
+        )
+        
+        # Convert image to base64 for display
+        buffered = io.BytesIO()
+        Image.fromarray(img_array).save(buffered, format="PNG")
+        img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
+        
+        return jsonify({
+            'success': True,
+            'image_data': f"data:image/png;base64,{img_str}",
+            'histogram': f"data:image/png;base64,{hist_plot}",
+            'metrics': metrics
+        })
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+@app.route('/equalize', methods=['POST'])
+def equalize_histogram():
+    try:
+        data = request.get_json()
+        image_data = data['image_data'].split(',')[1]
+        
+        # Decode base64 image
+        img_bytes = base64.b64decode(image_data)
+        img = Image.open(io.BytesIO(img_bytes))
+        img_array = np.array(img)
+        
+        # Apply histogram equalization
+        equalized = HistogramProcessor.histogram_equalization(img_array)
+        
+        # Calculate metrics
+        metrics = HistogramProcessor.calculate_metrics(equalized)
+        
+        # Create histogram plot
+        hist_plot = HistogramProcessor.create_histogram_plot(
+            equalized, 
+            'Histogram - After Equalization'
+        )
+        
+        # Convert result to base64
+        buffered = io.BytesIO()
+        Image.fromarray(equalized).save(buffered, format="PNG")
+        img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
+        
+        return jsonify({
+            'success': True,
+            'image_data': f"data:image/png;base64,{img_str}",
+            'histogram': f"data:image/png;base64,{hist_plot}",
+            'metrics': metrics
+        })
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+@app.route('/specify', methods=['POST'])
+def specify_histogram():
+    try:
+        data = request.get_json()
+        source_data = data['source_data'].split(',')[1]
+        reference_data = data['reference_data'].split(',')[1]
+        
+        # Decode base64 images
+        source_bytes = base64.b64decode(source_data)
+        reference_bytes = base64.b64decode(reference_data)
+        
+        source_img = Image.open(io.BytesIO(source_bytes))
+        reference_img = Image.open(io.BytesIO(reference_bytes))
+        
+        source_array = np.array(source_img)
+        reference_array = np.array(reference_img)
+        
+        # Apply histogram specification
+        specified = HistogramProcessor.histogram_specification(source_array, reference_array)
+        
+        # Calculate metrics
+        metrics = HistogramProcessor.calculate_metrics(specified)
+        
+        # Create histogram plot
+        hist_plot = HistogramProcessor.create_histogram_plot(
+            specified, 
+            'Histogram - After Specification'
+        )
+        
+        # Convert result to base64
+        buffered = io.BytesIO()
+        Image.fromarray(specified).save(buffered, format="PNG")
+        img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
+        
+        return jsonify({
+            'success': True,
+            'image_data': f"data:image/png;base64,{img_str}",
+            'histogram': f"data:image/png;base64,{hist_plot}",
+            'metrics': metrics
+        })
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=5000)
